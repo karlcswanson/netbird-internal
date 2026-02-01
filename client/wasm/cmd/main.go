@@ -17,6 +17,7 @@ import (
 	"github.com/netbirdio/netbird/client/wasm/internal/http"
 	"github.com/netbirdio/netbird/client/wasm/internal/rdp"
 	"github.com/netbirdio/netbird/client/wasm/internal/ssh"
+	"github.com/netbirdio/netbird/client/wasm/internal/tcp"
 	"github.com/netbirdio/netbird/util"
 	"github.com/netbirdio/netbird/version"
 )
@@ -341,6 +342,50 @@ func createRDPProxyMethod(client *netbird.Client) js.Func {
 	})
 }
 
+// createDialTcpMethod creates the dialTcp method for raw TCP connections
+// This enables VNC and other TCP-based protocols to work through NetBird
+func createDialTcpMethod(client *netbird.Client) js.Func {
+	return js.FuncOf(func(_ js.Value, args []js.Value) any {
+		if len(args) < 2 {
+			return js.ValueOf("error: hostname and port required")
+		}
+
+		if args[0].Type() != js.TypeString {
+			return createPromise(func(resolve, reject js.Value) {
+				reject.Invoke(js.ValueOf("hostname parameter must be a string"))
+			})
+		}
+
+		if args[1].Type() != js.TypeNumber {
+			return createPromise(func(resolve, reject js.Value) {
+				reject.Invoke(js.ValueOf("port parameter must be a number"))
+			})
+		}
+
+		hostname := args[0].String()
+		port := args[1].Int()
+		address := fmt.Sprintf("%s:%d", hostname, port)
+
+		return createPromise(func(resolve, reject js.Value) {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			log.Infof("Dialing TCP connection to %s", address)
+			conn, err := client.Dial(ctx, "tcp", address)
+			if err != nil {
+				log.Errorf("Failed to dial TCP %s: %v", address, err)
+				reject.Invoke(js.ValueOf(fmt.Sprintf("dial tcp %s: %v", address, err)))
+				return
+			}
+
+			log.Infof("TCP connection established to %s", address)
+			tcpConn := tcp.NewConnection(conn)
+			jsInterface := tcp.CreateJSInterface(tcpConn)
+			resolve.Invoke(jsInterface)
+		})
+	})
+}
+
 // getStatusOverview is a helper to get the status overview
 func getStatusOverview(client *netbird.Client) (nbstatus.OutputOverview, error) {
 	fullStatus, err := client.Status()
@@ -517,6 +562,7 @@ func createClientObject(client *netbird.Client) js.Value {
 	obj["createSSHConnection"] = createSSHMethod(client)
 	obj["proxyRequest"] = createProxyRequestMethod(client)
 	obj["createRDPProxy"] = createRDPProxyMethod(client)
+	obj["dialTcp"] = createDialTcpMethod(client)
 	obj["status"] = createStatusMethod(client)
 	obj["statusSummary"] = createStatusSummaryMethod(client)
 	obj["statusDetail"] = createStatusDetailMethod(client)

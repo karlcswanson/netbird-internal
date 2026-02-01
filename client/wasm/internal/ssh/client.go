@@ -13,7 +13,6 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	netbird "github.com/netbirdio/netbird/client/embed"
-	nbssh "github.com/netbirdio/netbird/client/ssh"
 )
 
 const (
@@ -58,7 +57,7 @@ func (c *Client) Connect(host string, port int, username, jwtToken string) error
 	config := &ssh.ClientConfig{
 		User:            username,
 		Auth:            authMethods,
-		HostKeyCallback: nbssh.CreateHostKeyCallback(c.nbClient),
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		Timeout:         sshDialTimeout,
 	}
 
