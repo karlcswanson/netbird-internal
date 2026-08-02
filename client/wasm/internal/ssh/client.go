@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"sync"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	netbird "github.com/netbirdio/netbird/client/embed"
+	nbssh "github.com/netbirdio/netbird/client/ssh"
 )
 
 const (
@@ -44,9 +46,12 @@ func NewClient(nbClient *netbird.Client) *Client {
 	}
 }
 
-// Connect establishes an SSH connection through NetBird network
-func (c *Client) Connect(host string, port int, username, jwtToken string) error {
-	addr := fmt.Sprintf("%s:%d", host, port)
+// Connect establishes an SSH connection through NetBird network.
+// ipVersion may be 4, 6, or 0 for automatic selection.
+// insecureSkipHostKeyVerification disables NetBird host key verification for
+// devices not enrolled as NetBird SSH peers (e.g. lab switches).
+func (c *Client) Connect(host string, port int, username, jwtToken string, ipVersion int, insecureSkipHostKeyVerification bool) error {
+	addr := net.JoinHostPort(host, fmt.Sprintf("%d", port))
 	logrus.Infof("SSH: Connecting to %s as %s", addr, username)
 
 	authMethods, err := c.getAuthMethods(jwtToken)
@@ -54,17 +59,30 @@ func (c *Client) Connect(host string, port int, username, jwtToken string) error
 		return err
 	}
 
+	hostKeyCallback := nbssh.CreateHostKeyCallback(c.nbClient)
+	if insecureSkipHostKeyVerification {
+		hostKeyCallback = ssh.InsecureIgnoreHostKey()
+	}
+
 	config := &ssh.ClientConfig{
 		User:            username,
 		Auth:            authMethods,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		HostKeyCallback: hostKeyCallback,
 		Timeout:         sshDialTimeout,
+	}
+
+	network := "tcp"
+	switch ipVersion {
+	case 4:
+		network = "tcp4"
+	case 6:
+		network = "tcp6"
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), sshDialTimeout)
 	defer cancel()
 
-	conn, err := c.nbClient.Dial(ctx, "tcp", addr)
+	conn, err := c.nbClient.Dial(ctx, network, addr)
 	if err != nil {
 		return fmt.Errorf("dial %s: %w", addr, err)
 	}
