@@ -18,10 +18,12 @@ import (
 	sshdetection "github.com/netbirdio/netbird/client/ssh/detection"
 	nbstatus "github.com/netbirdio/netbird/client/status"
 	wasmcapture "github.com/netbirdio/netbird/client/wasm/internal/capture"
+	"github.com/netbirdio/netbird/client/wasm/internal/gnmi"
 	"github.com/netbirdio/netbird/client/wasm/internal/http"
 	"github.com/netbirdio/netbird/client/wasm/internal/rdp"
 	"github.com/netbirdio/netbird/client/wasm/internal/ssh"
 	"github.com/netbirdio/netbird/client/wasm/internal/tcp"
+	"github.com/netbirdio/netbird/client/wasm/internal/udp"
 	nbwebsocket "github.com/netbirdio/netbird/client/wasm/internal/websocket"
 	"github.com/netbirdio/netbird/util"
 )
@@ -437,6 +439,72 @@ func createDialTcpMethod(client *netbird.Client) js.Func {
 	})
 }
 
+func createListenTcpMethod(client *netbird.Client) js.Func {
+	return js.FuncOf(func(_ js.Value, args []js.Value) any {
+		if len(args) < 1 {
+			return js.ValueOf("error: port required")
+		}
+
+		if args[0].Type() != js.TypeNumber {
+			return createPromise(func(resolve, reject js.Value) {
+				reject.Invoke(js.ValueOf("port parameter must be a number"))
+			})
+		}
+
+		port := args[0].Int()
+		if port < 1 || port > 65535 {
+			return createPromise(func(resolve, reject js.Value) {
+				reject.Invoke(js.ValueOf("port must be between 1 and 65535"))
+			})
+		}
+
+		return createPromise(func(resolve, reject js.Value) {
+			listener, err := client.ListenTCP(fmt.Sprintf(":%d", port))
+			if err != nil {
+				log.Errorf("Failed to listen TCP on port %d: %v", port, err)
+				reject.Invoke(js.ValueOf(fmt.Sprintf("listen tcp on port %d: %v", port, err)))
+				return
+			}
+
+			log.Infof("TCP listener started on %s", listener.Addr())
+			resolve.Invoke(tcp.CreateListenerJSInterface(listener, port))
+		})
+	})
+}
+
+func createListenUdpMethod(client *netbird.Client) js.Func {
+	return js.FuncOf(func(_ js.Value, args []js.Value) any {
+		if len(args) < 1 {
+			return js.ValueOf("error: port required")
+		}
+
+		if args[0].Type() != js.TypeNumber {
+			return createPromise(func(resolve, reject js.Value) {
+				reject.Invoke(js.ValueOf("port parameter must be a number"))
+			})
+		}
+
+		port := args[0].Int()
+		if port < 1 || port > 65535 {
+			return createPromise(func(resolve, reject js.Value) {
+				reject.Invoke(js.ValueOf("port must be between 1 and 65535"))
+			})
+		}
+
+		return createPromise(func(resolve, reject js.Value) {
+			conn, err := client.ListenUDP(fmt.Sprintf(":%d", port))
+			if err != nil {
+				log.Errorf("Failed to listen UDP on port %d: %v", port, err)
+				reject.Invoke(js.ValueOf(fmt.Sprintf("listen udp on port %d: %v", port, err)))
+				return
+			}
+
+			log.Infof("UDP socket bound on %s", conn.LocalAddr())
+			resolve.Invoke(udp.CreateJSInterface(conn, port))
+		})
+	})
+}
+
 // getStatusOverview is a helper to get the status overview
 func getStatusOverview(client *netbird.Client) (nbstatus.OutputOverview, error) {
 	fullStatus, err := client.Status()
@@ -729,11 +797,14 @@ func createClientObject(client *netbird.Client) js.Value {
 	obj["createRDPProxy"] = createRDPProxyMethod(client)
 	obj["dialTcp"] = createDialTcpMethod(client)
 	obj["dialWebSocket"] = createDialWebSocketMethod(client)
+	obj["listenTcp"] = createListenTcpMethod(client)
+	obj["listenUdp"] = createListenUdpMethod(client)
 	obj["status"] = createStatusMethod(client)
 	obj["statusSummary"] = createStatusSummaryMethod(client)
 	obj["statusDetail"] = createStatusDetailMethod(client)
 	obj["getSyncResponse"] = createGetSyncResponseMethod(client)
 	obj["setLogLevel"] = createSetLogLevelMethod(client)
+	obj["gnmi"] = gnmi.CreateJSInterface(gnmi.NewClient(client))
 	obj["startCapture"] = createStartCaptureMethod(client)
 
 	capStart, capStop := captureMethods(client)

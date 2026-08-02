@@ -75,15 +75,21 @@ func CreateJSInterface(conn *Connection) js.Value {
 		return js.Undefined()
 	}))
 
+	// Optional flow control: writeQueued/queued/pause/resume/ondrain.
+	// The write/close/ondata/onclose contract above is unchanged.
+	gate, cleanup := attachFlowControl(conn, jsInterface)
+
 	// Start the read loop in a goroutine
-	go readLoop(conn, jsInterface)
+	go readLoop(conn, jsInterface, gate, cleanup)
 
 	return jsInterface
 }
 
-func readLoop(conn *Connection, jsInterface js.Value) {
+func readLoop(conn *Connection, jsInterface js.Value, gate *readGate, cleanup func()) {
+	defer cleanup()
 	buffer := make([]byte, 32768) // 32KB buffer for VNC/RDP data
 	for {
+		gate.wait()
 		n, err := conn.Read(buffer)
 		if err != nil {
 			if err != io.EOF {

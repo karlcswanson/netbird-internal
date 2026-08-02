@@ -62,10 +62,13 @@ func parseOpts(jsOpts js.Value) (filter string, verbose, ascii bool) {
 	return
 }
 
-// Start creates a capture session and returns a JS interface for streaming text
-// output. The returned object exposes:
+// Start creates a capture session and returns a JS interface for streaming
+// capture output. The returned object exposes:
 //
 //	onpacket(callback)  - set callback(string) for each text line
+//	onpcap(callback)    - set callback(Uint8Array) for pcap-formatted bytes;
+//	                      concatenating the chunks yields a file that
+//	                      Wireshark and tcpdump can read
 //	stop()              - stop capture and return stats { packets, bytes, dropped }
 //
 // Options: { filter: string, verbose: bool, ascii: bool } or just a filter string.
@@ -73,9 +76,11 @@ func Start(client *netbird.Client, jsOpts js.Value) (js.Value, error) {
 	filter, verbose, ascii := parseOpts(jsOpts)
 
 	cb := &jsCallbackWriter{}
+	pcap := &jsBinaryWriter{}
 
 	cs, err := client.StartCapture(netbird.CaptureOptions{
 		TextOutput: cb,
+		Output:     pcap,
 		Filter:     filter,
 		Verbose:    verbose,
 		ASCII:      ascii,
@@ -92,9 +97,38 @@ func Start(client *netbird.Client, jsOpts js.Value) (js.Value, error) {
 	})
 	iface.Set("stop", handle.stopFn)
 	iface.Set("onpacket", js.Undefined())
+	iface.Set("onpcap", js.Undefined())
 	cb.setInterface(iface)
+	pcap.setInterface(iface)
 
 	return iface, nil
+}
+
+// jsBinaryWriter forwards pcap bytes to the JS onpcap callback. The stream
+// begins with a pcap file header, so chunks concatenated in order form a
+// valid capture file.
+type jsBinaryWriter struct {
+	iface js.Value
+}
+
+func (w *jsBinaryWriter) setInterface(iface js.Value) {
+	w.iface = iface
+}
+
+func (w *jsBinaryWriter) Write(p []byte) (int, error) {
+	if w.iface.IsUndefined() || len(p) == 0 {
+		return len(p), nil
+	}
+
+	cb := w.iface.Get("onpcap")
+	if cb.IsUndefined() || cb.IsNull() {
+		return len(p), nil
+	}
+
+	chunk := js.Global().Get("Uint8Array").New(len(p))
+	js.CopyBytesToJS(chunk, p)
+	cb.Invoke(chunk)
+	return len(p), nil
 }
 
 // StartConsole starts a capture that logs every packet line to console.log.
