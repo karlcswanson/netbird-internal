@@ -25,14 +25,22 @@ func CreateListenerJSInterface(listener net.Listener, port int) js.Value {
 	jsInterface.Set("addr", listener.Addr().String())
 	jsInterface.Set("port", port)
 
-	jsInterface.Set("close", js.FuncOf(func(this js.Value, args []js.Value) any {
+	closeFunc := js.FuncOf(func(this js.Value, args []js.Value) any {
 		if err := listener.Close(); err != nil {
 			logrus.Debugf("TCP listener close error: %v", err)
 		}
 		return js.Undefined()
-	}))
+	})
+	jsInterface.Set("close", closeFunc)
 
-	go acceptLoop(listener, jsInterface)
+	go func() {
+		acceptLoop(listener, jsInterface)
+
+		// Undefining before Release turns post-close JS calls into a
+		// TypeError instead of a silent "call to released function".
+		jsInterface.Set("close", js.Undefined())
+		closeFunc.Release()
+	}()
 
 	return jsInterface
 }

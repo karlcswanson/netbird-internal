@@ -138,12 +138,13 @@ func (g *readGate) wait() {
 // interface: writeQueued(data) -> queuedBytes|-1, queued() -> bytes,
 // pause(), resume(), and the ondrain callback property. The existing
 // write/close/ondata/onclose contract is unchanged. The returned cleanup
-// must be called when the connection ends so the writer goroutine exits.
-func attachFlowControl(conn *Connection, jsInterface js.Value) (*readGate, func()) {
+// must be called when the connection ends so the writer goroutine exits;
+// the returned funcs must then be undefined on the interface and released.
+func attachFlowControl(conn *Connection, jsInterface js.Value) (*readGate, []namedFunc, func()) {
 	queue := newWriteQueue()
 	gate := newReadGate()
 
-	jsInterface.Set("writeQueued", js.FuncOf(func(this js.Value, args []js.Value) any {
+	writeQueuedFunc := js.FuncOf(func(this js.Value, args []js.Value) any {
 		if len(args) < 1 {
 			return js.ValueOf(-1)
 		}
@@ -167,38 +168,51 @@ func attachFlowControl(conn *Connection, jsInterface js.Value) (*readGate, func(
 		}
 
 		return js.ValueOf(queue.push(bytes))
-	}))
+	})
+	jsInterface.Set("writeQueued", writeQueuedFunc)
 
-	jsInterface.Set("queued", js.FuncOf(func(this js.Value, args []js.Value) any {
+	queuedFunc := js.FuncOf(func(this js.Value, args []js.Value) any {
 		queue.mu.Lock()
 		defer queue.mu.Unlock()
 		return js.ValueOf(queue.total)
-	}))
+	})
+	jsInterface.Set("queued", queuedFunc)
 
-	jsInterface.Set("pause", js.FuncOf(func(this js.Value, args []js.Value) any {
+	pauseFunc := js.FuncOf(func(this js.Value, args []js.Value) any {
 		gate.pause()
 		return js.Undefined()
-	}))
+	})
+	jsInterface.Set("pause", pauseFunc)
 
-	jsInterface.Set("resume", js.FuncOf(func(this js.Value, args []js.Value) any {
+	resumeFunc := js.FuncOf(func(this js.Value, args []js.Value) any {
 		gate.unpause()
 		return js.Undefined()
-	}))
+	})
+	jsInterface.Set("resume", resumeFunc)
 
 	// Release queued writes when the connection goes away.
 	origClose := jsInterface.Get("close")
-	jsInterface.Set("close", js.FuncOf(func(this js.Value, args []js.Value) any {
+	closeWrapperFunc := js.FuncOf(func(this js.Value, args []js.Value) any {
 		queue.close()
 		gate.unpause()
 		if origClose.Type() == js.TypeFunction {
 			origClose.Invoke()
 		}
 		return js.Undefined()
-	}))
+	})
+	jsInterface.Set("close", closeWrapperFunc)
+
+	funcs := []namedFunc{
+		{"writeQueued", writeQueuedFunc},
+		{"queued", queuedFunc},
+		{"pause", pauseFunc},
+		{"resume", resumeFunc},
+		{"close", closeWrapperFunc},
+	}
 
 	cleanup := func() {
 		queue.close()
 		gate.unpause()
 	}
-	return gate, cleanup
+	return gate, funcs, cleanup
 }

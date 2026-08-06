@@ -35,6 +35,13 @@ func (c *Connection) Close() error {
 	return c.conn.Close()
 }
 
+// namedFunc pairs a js.Func with the interface property it is set on, so
+// the property can be undefined before the func is released.
+type namedFunc struct {
+	name string
+	fn   js.Func
+}
+
 // CreateJSInterface creates a JavaScript interface for the TCP connection
 // The interface provides:
 //   - write(data): Write data (string or Uint8Array) to the connection
@@ -45,7 +52,7 @@ func CreateJSInterface(conn *Connection) js.Value {
 	jsInterface := js.Global().Get("Object").Call("create", js.Null())
 
 	// write(data) - write data to the connection
-	jsInterface.Set("write", js.FuncOf(func(this js.Value, args []js.Value) any {
+	writeFunc := js.FuncOf(func(this js.Value, args []js.Value) any {
 		if len(args) < 1 {
 			return js.ValueOf(false)
 		}
@@ -65,22 +72,34 @@ func CreateJSInterface(conn *Connection) js.Value {
 
 		_, err := conn.Write(bytes)
 		return js.ValueOf(err == nil)
-	}))
+	})
+	jsInterface.Set("write", writeFunc)
 
 	// close() - close the connection
-	jsInterface.Set("close", js.FuncOf(func(this js.Value, args []js.Value) any {
+	closeFunc := js.FuncOf(func(this js.Value, args []js.Value) any {
 		if err := conn.Close(); err != nil {
 			logrus.Debugf("TCP close error: %v", err)
 		}
 		return js.Undefined()
-	}))
+	})
+	jsInterface.Set("close", closeFunc)
 
 	// Optional flow control: writeQueued/queued/pause/resume/ondrain.
 	// The write/close/ondata/onclose contract above is unchanged.
-	gate, cleanup := attachFlowControl(conn, jsInterface)
+	gate, flowFuncs, cleanup := attachFlowControl(conn, jsInterface)
 
-	// Start the read loop in a goroutine
-	go readLoop(conn, jsInterface, gate, cleanup)
+	funcs := append([]namedFunc{{"write", writeFunc}, {"close", closeFunc}}, flowFuncs...)
+
+	go func() {
+		readLoop(conn, jsInterface, gate, cleanup)
+
+		// Undefining before Release turns post-close JS calls into a
+		// TypeError instead of a silent "call to released function".
+		for _, nf := range funcs {
+			jsInterface.Set(nf.name, js.Undefined())
+			nf.fn.Release()
+		}
+	}()
 
 	return jsInterface
 }
