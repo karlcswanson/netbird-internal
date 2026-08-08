@@ -3,15 +3,14 @@
 package http
 
 import (
-	"crypto/tls"
 	"fmt"
 	"io"
+	log "github.com/sirupsen/logrus"
 	"net/http"
 	"strings"
 	"syscall/js"
 	"time"
 
-	log "github.com/sirupsen/logrus"
 	netbird "github.com/netbirdio/netbird/client/embed"
 )
 
@@ -21,16 +20,9 @@ const (
 )
 
 // performRequest executes an HTTP request through NetBird and returns the response and body
-func performRequest(nbClient *netbird.Client, method, url string, headers map[string]string, body []byte, insecureSkipVerify bool) (*http.Response, []byte, error) {
+func performRequest(nbClient *netbird.Client, method, url string, headers map[string]string, body []byte) (*http.Response, []byte, error) {
 	httpClient := nbClient.NewHTTPClient()
 	httpClient.Timeout = httpTimeout
-
-	// Configure TLS if needed
-	if insecureSkipVerify {
-		if transport, ok := httpClient.Transport.(*http.Transport); ok {
-			transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
-		}
-	}
 
 	req, err := http.NewRequest(method, url, strings.NewReader(string(body)))
 	if err != nil {
@@ -86,17 +78,12 @@ func ProxyRequest(nbClient *netbird.Client, request js.Value) (js.Value, error) 
 		}
 	}
 
-	insecureSkipVerify := false
-	if insecureVal := request.Get("insecureSkipVerify"); !insecureVal.IsNull() && !insecureVal.IsUndefined() {
-		insecureSkipVerify = insecureVal.Bool()
-	}
-
 	returnBytes := false
 	if returnBytesVal := request.Get("returnBytes"); !returnBytesVal.IsNull() && !returnBytesVal.IsUndefined() {
 		returnBytes = returnBytesVal.Bool()
 	}
 
-	resp, body, err := performRequest(nbClient, method, url, requestHeaders, requestBody, insecureSkipVerify)
+	resp, body, err := performRequest(nbClient, method, url, requestHeaders, requestBody)
 	if err != nil {
 		return js.Undefined(), err
 	}

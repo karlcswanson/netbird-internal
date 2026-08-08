@@ -48,9 +48,7 @@ func NewClient(nbClient *netbird.Client) *Client {
 
 // Connect establishes an SSH connection through NetBird network.
 // ipVersion may be 4, 6, or 0 for automatic selection.
-// insecureSkipHostKeyVerification disables NetBird host key verification for
-// devices not enrolled as NetBird SSH peers (e.g. lab switches).
-func (c *Client) Connect(host string, port int, username, jwtToken string, ipVersion int, insecureSkipHostKeyVerification bool) error {
+func (c *Client) Connect(host string, port int, username, jwtToken string, ipVersion int) error {
 	addr := net.JoinHostPort(host, fmt.Sprintf("%d", port))
 	logrus.Infof("SSH: Connecting to %s as %s", addr, username)
 
@@ -59,15 +57,10 @@ func (c *Client) Connect(host string, port int, username, jwtToken string, ipVer
 		return err
 	}
 
-	hostKeyCallback := nbssh.CreateHostKeyCallback(c.nbClient)
-	if insecureSkipHostKeyVerification {
-		hostKeyCallback = ssh.InsecureIgnoreHostKey()
-	}
-
 	config := &ssh.ClientConfig{
 		User:            username,
 		Auth:            authMethods,
-		HostKeyCallback: hostKeyCallback,
+		HostKeyCallback: nbssh.CreateHostKeyCallback(c.nbClient),
 		Timeout:         sshDialTimeout,
 	}
 

@@ -18,7 +18,6 @@ import (
 	sshdetection "github.com/netbirdio/netbird/client/ssh/detection"
 	nbstatus "github.com/netbirdio/netbird/client/status"
 	wasmcapture "github.com/netbirdio/netbird/client/wasm/internal/capture"
-	"github.com/netbirdio/netbird/client/wasm/internal/gnmi"
 	"github.com/netbirdio/netbird/client/wasm/internal/http"
 	"github.com/netbirdio/netbird/client/wasm/internal/rdp"
 	"github.com/netbirdio/netbird/client/wasm/internal/ssh"
@@ -174,10 +173,10 @@ func createSSHMethod(client *netbird.Client) js.Func {
 			})
 		}
 
-		jwtToken, ipVersion, insecureSkipHostKeyVerification := parseSSHOptions(args)
+		jwtToken, ipVersion := parseSSHOptions(args)
 
 		return createPromise(func(resolve, reject js.Value) {
-			jsInterface, err := connectSSH(client, host, port, username, jwtToken, ipVersion, insecureSkipHostKeyVerification)
+			jsInterface, err := connectSSH(client, host, port, username, jwtToken, ipVersion)
 			if err != nil {
 				reject.Invoke(err.Error())
 				return
@@ -187,23 +186,20 @@ func createSSHMethod(client *netbird.Client) js.Func {
 	})
 }
 
-func parseSSHOptions(args []js.Value) (jwtToken string, ipVersion int, insecureSkipHostKeyVerification bool) {
+func parseSSHOptions(args []js.Value) (jwtToken string, ipVersion int) {
 	if len(args) > 3 && !args[3].IsNull() && !args[3].IsUndefined() {
 		jwtToken = args[3].String()
 	}
 	if len(args) > 4 {
 		ipVersion = jsIPVersion(args[4])
 	}
-	if len(args) > 5 && args[5].Type() == js.TypeBoolean {
-		insecureSkipHostKeyVerification = args[5].Bool()
-	}
 	return
 }
 
-func connectSSH(client *netbird.Client, host string, port int, username, jwtToken string, ipVersion int, insecureSkipHostKeyVerification bool) (js.Value, error) {
+func connectSSH(client *netbird.Client, host string, port int, username, jwtToken string, ipVersion int) (js.Value, error) {
 	sshClient := ssh.NewClient(client)
 
-	if err := sshClient.Connect(host, port, username, jwtToken, ipVersion, insecureSkipHostKeyVerification); err != nil {
+	if err := sshClient.Connect(host, port, username, jwtToken, ipVersion); err != nil {
 		return js.Undefined(), err
 	}
 
@@ -804,7 +800,6 @@ func createClientObject(client *netbird.Client) js.Value {
 	obj["statusDetail"] = createStatusDetailMethod(client)
 	obj["getSyncResponse"] = createGetSyncResponseMethod(client)
 	obj["setLogLevel"] = createSetLogLevelMethod(client)
-	obj["gnmi"] = gnmi.CreateJSInterface(gnmi.NewClient(client))
 	obj["startCapture"] = createStartCaptureMethod(client)
 
 	capStart, capStop := captureMethods(client)
