@@ -78,6 +78,11 @@ func ProxyRequest(nbClient *netbird.Client, request js.Value) (js.Value, error) 
 		}
 	}
 
+	returnBytes := false
+	if returnBytesVal := request.Get("returnBytes"); !returnBytesVal.IsNull() && !returnBytesVal.IsUndefined() {
+		returnBytes = returnBytesVal.Bool()
+	}
+
 	resp, body, err := performRequest(nbClient, method, url, requestHeaders, requestBody)
 	if err != nil {
 		return js.Undefined(), err
@@ -86,7 +91,16 @@ func ProxyRequest(nbClient *netbird.Client, request js.Value) (js.Value, error) 
 	result := js.Global().Get("Object").New()
 	result.Set("status", resp.StatusCode)
 	result.Set("statusText", resp.Status)
-	result.Set("body", string(body))
+
+	if returnBytes {
+		// Return body as Uint8Array for binary data
+		jsBody := js.Global().Get("Uint8Array").New(len(body))
+		js.CopyBytesToJS(jsBody, body)
+		result.Set("body", jsBody)
+	} else {
+		// Return body as string (default, backwards compatible)
+		result.Set("body", string(body))
+	}
 
 	headers := js.Global().Get("Object").New()
 	for key, values := range resp.Header {

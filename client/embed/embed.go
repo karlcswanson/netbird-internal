@@ -123,24 +123,16 @@ type Performance struct {
 	MaxBatchSize *uint32
 }
 
-// validateCredentials checks that exactly one credential type is provided
+// validateCredentials checks that a usable credential combination is provided.
+// SetupKey and JWTToken are mutually exclusive authentication credentials.
+// PrivateKey alone authenticates an already-registered peer; combined with
+// SetupKey or JWTToken it pins the peer's WireGuard identity across restarts.
 func (opts *Options) validateCredentials() error {
-	credentialsProvided := 0
-	if opts.SetupKey != "" {
-		credentialsProvided++
-	}
-	if opts.JWTToken != "" {
-		credentialsProvided++
-	}
-	if opts.PrivateKey != "" {
-		credentialsProvided++
-	}
-
-	if credentialsProvided == 0 {
+	if opts.SetupKey == "" && opts.JWTToken == "" && opts.PrivateKey == "" {
 		return fmt.Errorf("one of SetupKey, JWTToken, or PrivateKey must be provided")
 	}
-	if credentialsProvided > 1 {
-		return fmt.Errorf("only one of SetupKey, JWTToken, or PrivateKey can be specified")
+	if opts.SetupKey != "" && opts.JWTToken != "" {
+		return fmt.Errorf("only one of SetupKey or JWTToken can be specified")
 	}
 
 	return nil
